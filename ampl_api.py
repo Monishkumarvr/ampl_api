@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from pydantic import BaseModel
 from amplpy import AMPL, modules
 import tempfile
 
@@ -8,45 +9,38 @@ app = FastAPI()
 def install_solver():
     modules.install("coin")          # IPOPT
 
-@app.post("/solve")
-async def solve_ampl_model(request: Request):
-    model_bytes = await request.body()
-    model_str   = model_bytes.decode("utf-8")
+# ---------- request schema ----------
+class ModelRequest(BaseModel):
+    model: str                       # AMPL text
 
+@app.post("/solve")
+def solve_ampl_model(req: ModelRequest):
+    model_str = req.model            # ← plain AMPL text
+
+    # save to temp file
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".mod", delete=False) as f:
         f.write(model_str)
-        model_file = f.name
+        modfile = f.name
 
     ampl = AMPL()
-    ampl.read(model_file)
-    ampl.option["solver"]         = "ipopt"
-    ampl.option["solution_round"] = 3
-    ampl.option["print_level"]    = 12
+    ampl.read(modfile)
+    ampl.option["solver"] = "ipopt"
 
     out = {}
     try:
         ampl.solve()
         out["status"] = ampl.get_value("solve_result")
-
-        # decision variables
-        out["variables"] = {k: v.value() for k, v in ampl.get_variables()}
-
-        # constraints (raw bodies – can be changed to .dual() etc. if you prefer)
-        out["constraints"] = {k: c.body() for k, c in ampl.get_constraints()}
-
-        # parameters
+        out["variables"]   = {k: v.value()   for k, v in ampl.get_variables()}
+        out["constraints"] = {k: c.body()    for k, c in ampl.get_constraints()}
         out["variables"].update({k: p.value() for k, p in ampl.get_parameters()})
 
-        # objective / total cost
+        # objective (z or first objective)
         try:
-            out["total_cost"] = ampl.get_value("z")          # if a z exists
+            out["total_cost"] = ampl.get_value("z")
         except RuntimeError:
-            objectives = ampl.get_objectives()
-            first_obj  = next(iter(objectives), None)
-            out["total_cost"] = first_obj.get().value() if first_obj else None
-
+            name = next(iter(ampl.get_objectives().keys()), None)
+            out["total_cost"] = ampl.get_value(name) if name else None
     except Exception as e:
         out["status"] = "error"
         out["error"]  = str(e)
-
     return out
