@@ -29,8 +29,10 @@ async def solve_ampl_model(request: Request):
         result["variables"] = {
             k: v.value() for k, v in ampl.get_variables()
         }
-        if ampl.is_defined("z"):
+        try:
             result["objective"] = ampl.get_value("z")
+        except RuntimeError:
+            result["objective"] = None
     except Exception as e:
         result["error"] = str(e)
 
