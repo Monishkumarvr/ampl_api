@@ -30,9 +30,14 @@ async def solve_ampl_model(request: Request):
             k: v.value() for k, v in ampl.get_variables()
         }
         try:
-            result["objective"] = ampl.get_value("z")
-        except RuntimeError:
-            result["objective"] = None
+            objectives = ampl.get_objectives()
+            if objectives:
+                first_obj = list(objectives.values())[0]
+                result["objective"] = first_obj.value()
+            else:
+                result["objective"] = None
+        except Exception as e:
+            result["error"] = str(e)
     except Exception as e:
         result["error"] = str(e)
 
